@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import risk_kit as rk
 from abc import ABC
+from collections import Iterable
+from scipy.optimize import broyden1
 
 
 class BinomialTree(ABC):
@@ -30,7 +32,6 @@ class BinomialTree(ABC):
     @n.setter
     def n(self, val):
         self._n = val
-    
 
     @property
     def q(self):
@@ -38,7 +39,7 @@ class BinomialTree(ABC):
         Gets the probability of a security going up.
         """
         return self._q
-    
+
     @q.setter
     def q(self, val):
         self._q = val
@@ -62,13 +63,13 @@ class BinomialTree(ABC):
     def tree(self, tree):
         self._tree = tree
 
-
     def printtree(self):
         """
 		Prints the prices of the binomial pricing tree.
 		"""
         for i in range(self.n + 1):
-            print(self.tree[i][:i+1])
+            print("Period = " + str(i))
+            print(self.tree[i][: i + 1].round(10))
 
     def __init__(self, n, q=0.5):
         """
@@ -89,6 +90,8 @@ class StockPricing(BinomialTree):
 
     Parameters:
     ----------
+    n: int
+        Number of periods
 
     S0: float
         The initial price of the security
@@ -108,7 +111,7 @@ class StockPricing(BinomialTree):
     @property
     def S0(self):
         return self._S0
-    
+
     @S0.setter
     def S0(self, val):
         self._S0 = val
@@ -116,7 +119,7 @@ class StockPricing(BinomialTree):
     @property
     def u(self):
         return self._u
-    
+
     @u.setter
     def u(self, val):
         self._u = val
@@ -124,7 +127,7 @@ class StockPricing(BinomialTree):
     @property
     def d(self):
         return self._d
-    
+
     @d.setter
     def d(self, val):
         self._d = val
@@ -132,7 +135,7 @@ class StockPricing(BinomialTree):
     @property
     def c(self):
         return self._c
-    
+
     @c.setter
     def c(self, val):
         self._c = val
@@ -189,10 +192,9 @@ class FuturesPricing(BinomialTree):
 
     __doc__ += BinomialTree.__doc__
 
-
     @property
     def price(self):
-        return self.tree[0, 0]    
+        return self.tree[0, 0]
 
     def _constructTree(self, model, coupon):
         """
@@ -201,14 +203,13 @@ class FuturesPricing(BinomialTree):
 
         for i in range(self.n, -1, -1):
             if i == self.n:
-                self.tree[i] = model.tree[i, :(i + 1)] - coupon
+                self.tree[i] = model.tree[i, : (i + 1)] - coupon
             else:
                 for j in range(i + 1):
                     childd = self.tree[i + 1, j]
                     childu = self.tree[i + 1, j + 1]
 
                     self.tree[i, j] = self.q * childu + (1 - self.q) * childd
-
 
     def __init__(self, n, model, q, unpaid_coupon=0.0):
 
@@ -224,14 +225,20 @@ class OptionsPricing(BinomialTree):
 
     Parameters
     ----------
+    n: int
+        Number of periods
+
     model: BinomialTree
         The underlying security model from which the options contract is derived.
 
-    K: float
-        The strike price of the option contract.
-
     r: float / BinomialTree
         The rate of interest to be used. Should be a scalar if fixed and a binomial model otherwise.
+
+    q: float
+        The probability of price going up in the binomial model
+
+    K: float
+        The strike price of the option contract.
 
     is_call: bool
         Sets to True if the option is call and False if the option is put. Defaults to True,
@@ -294,14 +301,13 @@ class OptionsPricing(BinomialTree):
         result = []
         for time, no, early_ex, hold in sorted(self._early_exercise):
             data = {
-                'Time': time,
-                'Current Premium': early_ex,
-                'Hold': hold,
+                "Time": time,
+                "Current Premium": early_ex,
+                "Hold": hold,
             }
             result.append(data)
 
         return result
-    
 
     def _constructTree(self, model, r):
         """
@@ -337,7 +343,6 @@ class OptionsPricing(BinomialTree):
 
                     self.tree[i, j] = max(hold, early_ex) if self.is_american else hold
 
-
     def __init__(self, n, model, r, q, K, is_call=True, is_american=False):
         """
         Initializes the black scholes model and other parameters from the given parameters.
@@ -362,9 +367,14 @@ class BondPricing(BinomialTree):
 
     Parameters:
     ----------
+    n: int
+        The number of periods.
 
     F: float
         The face value of the bond.
+    
+    q: float
+        The probability of the price going upward in the binomial model.
 
     u: float
         The factor by which the bond price goes up.
@@ -382,7 +392,7 @@ class BondPricing(BinomialTree):
     @property
     def F(self):
         return self._F
-    
+
     @F.setter
     def F(self, val):
         self._F = val
@@ -390,7 +400,7 @@ class BondPricing(BinomialTree):
     @property
     def c(self):
         return self._c
-    
+
     @c.setter
     def c(self, val):
         self._c = val
@@ -411,9 +421,10 @@ class BondPricing(BinomialTree):
                 childd = self.tree[i + 1, j]
                 childu = self.tree[i + 1, j + 1]
 
-                price = coupon + (self.q * childu + (1 - self.q) * childd) / (1 + rate[i, j])
+                price = coupon + (self.q * childu + (1 - self.q) * childd) / (
+                    1 + rate[i, j]
+                )
                 self.tree[i, j] = price
-
 
     def __init__(self, n, F, q, r, c=0.0):
         """
@@ -475,7 +486,7 @@ class ForwardsPricing(BinomialTree):
         Gets the price of the forward contract on the underlying security.
         """
         zcb_n = BondPricing(self.n, 1, self.q, self.r).price
-        return self.tree[0, 0]  / zcb_n   
+        return self.tree[0, 0] / zcb_n
 
     def _constructTree(self, model, r, coupon):
         """
@@ -490,14 +501,15 @@ class ForwardsPricing(BinomialTree):
 
         for i in range(self.n, -1, -1):
             if i == self.n:
-                self.tree[i] = model.tree[i, :(i + 1)] - coupon
+                self.tree[i] = model.tree[i, : (i + 1)] - coupon
             else:
                 for j in range(i + 1):
                     childd = self.tree[i + 1, j]
                     childu = self.tree[i + 1, j + 1]
 
-                    self.tree[i, j] = (self.q * childu + (1 - self.q) * childd) / (1 + rate[i, j])
-
+                    self.tree[i, j] = (self.q * childu + (1 - self.q) * childd) / (
+                        1 + rate[i, j]
+                    )
 
     def __init__(self, n, model, q, r, unpaid_coupon=0.0):
 
@@ -517,6 +529,11 @@ class SwapsPricing(BinomialTree):
 
     Parameters:
     ----------
+    n: int
+        The number of periods.
+
+    q: float
+        The probability of the price of security going upward. 
     
     fixed_rate: float
         The fixed rate of interest to be paid/recieved in the swap contract
@@ -579,7 +596,11 @@ class SwapsPricing(BinomialTree):
 
         for i in range(self.n, -1, -1):
             if i == self.n:
-                self.tree[i] = (rate[i, :(i + 1)] - self.fixed_rate) * self.multiplier / (rate[i, :(i + 1)] + 1)
+                self.tree[i] = (
+                    (rate[i, : (i + 1)] - self.fixed_rate)
+                    * self.multiplier
+                    / (rate[i, : (i + 1)] + 1)
+                )
             else:
                 for j in range(i + 1):
                     childd = self.tree[i + 1, j]
@@ -588,18 +609,19 @@ class SwapsPricing(BinomialTree):
                     value = (self.q * childu + (1 - self.q) * childd) / (1 + rate[i, j])
 
                     if i >= self.start_time - 1:
-                        payment = ((rate[i, j] - self.fixed_rate) * self.multiplier) / (1 + rate[i, j])
+                        payment = ((rate[i, j] - self.fixed_rate) * self.multiplier) / (
+                            1 + rate[i, j]
+                        )
                         value += payment
 
                     self.tree[i, j] = value
-
 
     def __init__(self, n, q, fixed_rate, start_time, is_long, r):
         """
         Initializes the model based on the given parameters.
         """
 
-        super().__init__(n, q)
+        super().__init__(n - 1, q)
 
         self.fixed_rate = fixed_rate
 
@@ -608,5 +630,190 @@ class SwapsPricing(BinomialTree):
         self.multiplier = 1 if is_long else -1
 
         self.r = r
+
+        self._constructTree(r)
+
+
+class BDTRate(BinomialTree):
+    """
+    Implements a black-derman-toy short rate model over the binomial tree model.
+    Inherits the BinomialTree class.
+
+    Assumes the number of periods is equal to the length of the dirft vector - 1.
+    
+    rate[i, j] = a[i] * exp(b[i] * j), where
+
+    rate[i, j] - Rate of interest at period i and  state j
+
+    a[i] - Drift at period i
+
+    b[i] - volatility at period i
+
+    Parameters:
+    ----------
+    n: int
+        The number of periods.
+
+    drift: scalar / np.array
+        The list of a[i] in the black-derman-toy model
+
+    vol: scalar / np.array
+        The list of b[i] in the black-derman-toy model
+    """
+
+    __doc__ += BinomialTree.__doc__
+
+    @property
+    def a(self):
+        return self._a
+
+    @a.setter
+    def a(self, val):
+
+        if isinstance(val, int) or isinstance(val, float):
+            val = np.repeat(val, self.n)
+        self._a = val
+
+    @property
+    def b(self):
+        return self._b
+
+    @b.setter
+    def b(self, val):
+
+        if isinstance(val, int) or isinstance(val, float):
+            val = np.repeat(val, self.n + 1)
+        self._b = val
+
+    def _constructTree(self):
+        """
+        Constructs the binomial tree model for interest rates based on
+        the BDT equation.
+        """
+        for i in range(self.n + 1):
+            for j in range(i + 1):
+                self.tree[i, j] = self.a[i] * np.exp(self.b[j] * j)
+
+    def __init__(self, n, drift, vol):
+        """
+        Initializes the model based on the given parameters.
+        """
+
+        super().__init__(n - 1)
+
+        self.a = drift
+
+        self.b = vol
+
+        self._constructTree()
+
+    @classmethod
+    def calibrate(cls, n, q, vol, market_spot_rates, iterations=200):
+        """
+        Calibrates the optimal drift for the given market spot rates
+        Initializes the model from the corresponding optimal drift and vol
+
+        Parameters:
+        ----------
+        n: int
+            The number of periods
+
+        q: float
+            The probability of rates going upward in the binomial model
+        
+        vol: scalar / np.array
+            The volatility for the model
+
+        market_spot_rates: np.array
+            The current spot rates for n periods to be used for optimization
+
+        max_iter: int
+            The number of iterations for which the optimization function should run
+
+        Returns:
+        -------
+        (BDTRate, error): Returns a tuple of BDTRate instance calibrated from the given parameters and
+                            the squared error in the result.
+        """
+
+        def error(drift):
+            rates = BDTRate(n, drift, vol)
+            spot_rates = CashPricing(n, q, rates).get_spot_rates()
+
+            error = spot_rates - market_spot_rates
+            return error
+
+        initial_guess = np.repeat(0.05, n)
+        drift = broyden1(error, initial_guess, iter=iterations)
+        exp_error = (error(drift) ** 2).sum()
+
+        return cls(n, drift, vol), exp_error
+
+
+class CashPricing(BinomialTree):
+    """
+    Implements the binomial model for pricing 1 unit of cash.
+    Inherits the BinomialTree class.
+
+    Each node of the binomial tree denotes the value of 1 unit of cash at that node.
+    For example, tree[i, j] denotes the value of 1($) at period i and state j.
+
+    Parameters:
+    ----------
+    n: int
+        The number of periods.    
+
+    q: float
+        The probability of price going up in the binomial model
+
+    r: BinomialTree
+        The rates of interest
+    """
+
+    def _constructTree(self, r):
+        """
+        Constructs the binomial tree for pricing a unit of cash.
+
+        The i, j node of the tree denotes the price of a unit of cash at period i and state j.
+        """
+
+        rate = r.tree
+
+        self.tree[0, 0] = 1
+        for i in range(1, self.n + 1):
+
+            # The bottom most nodes
+            self.tree[i, 0] = (1 - self.q) * self.tree[i - 1, 0] / (1 + rate[i - 1, 0])
+
+            # The top most nodes
+            self.tree[i, i] = (
+                self.q * self.tree[i - 1, i - 1] / (1 + rate[i - 1, i - 1])
+            )
+
+            for j in range(1, i):
+                par_d = self.tree[i - 1, j - 1] / (1 + rate[i - 1, j - 1])
+                par_u = self.tree[i - 1, j] / (1 + rate[i - 1, j])
+
+                self.tree[i, j] = self.q * par_d + (1 - self.q) * par_u
+
+    def get_zcb_prices(self):
+        """
+        Returns the prices of zero coupon bonds for the corresponding interest rates.
+        """
+        return self.tree.sum(axis=1)
+
+    def get_spot_rates(self):
+        """
+        Returns the spot rates for the corresponding interest rates.
+        """
+
+        zcb_prices = self.get_zcb_prices()[1:]
+        spot_rates = zcb_prices ** -(1 / (np.arange(self.n) + 1)) - 1
+
+        return spot_rates
+
+    def __init__(self, n, q, r):
+
+        super().__init__(n, q)
 
         self._constructTree(r)

@@ -82,11 +82,7 @@ def compound_interest(principal, rate, n_years, periods_per_year=12):
 
 
 def blackscholes_to_binomial(
-    ann_risk_free_rate,
-    ann_volatility,
-    n_periods,
-    n_years,
-    dividend=0.0
+    ann_risk_free_rate, ann_volatility, n_periods, n_years, dividend=0.0
 ):
     """
     Converts the parameters of the BlackScholesModel to those of Binomial pricing model.
