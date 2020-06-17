@@ -131,3 +131,28 @@ def blackscholes_to_binomial(
     }
 
     return binomial_params
+
+
+def duration(flows):
+    """
+    Computes the effective duration of the cash flows discounted at the given rate.
+
+    Parameters:
+    ----------
+
+    flows (np.array): The cash flows for which the effective duration is to be computed
+
+    discount_rate (scalar): The rate at which cash flows are to be discounted
+
+    Return:
+    ------
+
+    Returns the effective duration of the cashflows in terms of the number of periods.
+    """
+
+    total_flow = flows.sum()
+    weights = flows / total_flow
+
+    value = weights.T @ flows.index
+
+    return value

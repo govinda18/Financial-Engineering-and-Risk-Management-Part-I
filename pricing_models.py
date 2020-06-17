@@ -435,12 +435,12 @@ class BondPricing(BinomialTree):
         r = 1
 
         if hazard is not None:
-            a = hazard['a']
-            b = hazard['b']
-            r = hazard['recovery_rate']
+            a = hazard["a"]
+            b = hazard["b"]
+            r = hazard["recovery_rate"]
             for i in range(self.n + 1):
                 for j in range(i + 1):
-                    h[i, j] = a * b ** (j - i/2)
+                    h[i, j] = a * b ** (j - i / 2)
 
         return (h, r)
 
@@ -462,7 +462,9 @@ class BondPricing(BinomialTree):
                 childd = self.tree[i + 1, j]
                 childu = self.tree[i + 1, j + 1]
 
-                non_hazard_price = (coupon + (self.q * childu + (1 - self.q) * childd)) * (1 - h[i, j])
+                non_hazard_price = (
+                    coupon + (self.q * childu + (1 - self.q) * childd)
+                ) * (1 - h[i, j])
                 hazard_price = h[i, j] * recovery_rate * self.F
                 self.tree[i, j] = (non_hazard_price + hazard_price) / (1 + rate[i, j])
 
@@ -859,3 +861,320 @@ class CashPricing(BinomialTree):
         super().__init__(n, q)
 
         self._constructTree(r)
+
+
+class LevelPaymentMortgage(object):
+    """
+    Implements the class of a single fixed-rate level payment mortgage structure.
+    Assumes no pre-payment. 
+
+    Parameters:
+    ----------
+
+    P: float
+        The total principal amount of the mortgage.
+
+    r: float
+        The annual rate of interest of the mortgage.
+
+    T: int
+        The total number of years for which the payment is to be made.
+    """
+
+    @property
+    def P(self):
+        return self._P
+
+    @P.setter
+    def P(self, val):
+        self._P = val
+
+    @property
+    def r(self):
+        return self._r
+
+    @r.setter
+    def r(self, val):
+        self._r = val
+
+    @property
+    def T(self):
+        return self._T
+
+    @T.setter
+    def T(self, val):
+        self._T = val
+
+    @property
+    def periods(self):
+        return self._periods
+
+    @periods.setter
+    def periods(self, val):
+        self._periods = val
+
+    @property
+    def monthly_payment(self):
+        """
+        The monthly payment which needs to be given
+        """
+        c = self.r
+        n = self.T * self.periods
+        M0 = self.P
+
+        payment = (M0 * c * (1 + c) ** n) / ((1 + c) ** n - 1)
+        return payment
+
+    @property
+    def annualized_rate(self):
+        """
+        The effective annualized rate of interest after compounding periodically
+        """
+        return (1 + self.r) ** self.periods - 1
+
+    def get_value(self, rate):
+        """
+        The effective value of the mortgage
+
+        Parameters:
+        ----------
+
+        rate: scalar/np.array
+            The risk free rate of interest to be used for discounting cash flows.
+            If the rates vary over time, it should be a numpy array of expected rates
+            of interest of size periods. 
+        """
+
+        B = self.monthly_payment
+        n = self.T * self.periods
+
+        if isinstance(rate, int) or isinstance(rate, float):
+            rate = np.repeat(rate, n)
+
+        t = np.arange(1, n + 1)
+
+        value = (1 + rate) ** (-t) * B
+
+        return value
+
+    def __init__(self, P, r, T, periods_per_year=12):
+        """
+        Initializes the class instance with the given parameters.
+        """
+
+        self.P = P
+
+        self.periods = periods_per_year
+
+        self.r = r / periods_per_year
+
+        self.T = T
+
+
+class PassThroughMBS(object):
+    """
+    Implements a basic pass through mortgage backed securitization which 
+    consists of only single type of mortgages and a constant prepayment factor
+    in terms of the PSA.
+
+    Parameters:
+    ----------
+    P: float
+        The principal payment of the pool of mortgages.
+
+    T: int
+        The number of years
+
+    loan_r: float
+        The rate of interest of lending
+
+    pass_r: float
+        The rate of interest given to investors
+
+    PSA: float
+        The rate of prepayment in terms of PSA multiplier
+
+    age: int
+        The age of the pool. Defaults to 0
+
+    periods_per_year: int
+        The number of periods per year. Defualts to 12.
+    """
+
+    @property
+    def P(self):
+        return self._P
+
+    @P.setter
+    def P(self, val):
+        self._P = val
+
+    @property
+    def T(self):
+        return self._T
+
+    @T.setter
+    def T(self, val):
+        self._T = val
+
+    @property
+    def loan_r(self):
+        return self._loan_r
+
+    @loan_r.setter
+    def loan_r(self, val):
+        self._loan_r = val
+
+    @property
+    def pass_r(self):
+        return self._pass_r
+
+    @pass_r.setter
+    def pass_r(self, val):
+        self._pass_r = val
+
+    @property
+    def PSA(self):
+        return self._PSA
+
+    @PSA.setter
+    def PSA(self, val):
+        self._PSA = val
+
+    @property
+    def age(self):
+        return self._age
+
+    @age.setter
+    def age(self, val):
+        self._age = val
+
+    @property
+    def periods(self):
+        return self._periods
+
+    @periods.setter
+    def periods(self, val):
+        self._periods = val
+
+    @property
+    def data(self):
+        """
+        Gets a pandas dataframe indexed by the number of periods.
+        The columns contain the monthly data about the following:
+
+        Total Payment Received:
+            The payment recieved from the mortgage holders each month
+        
+        Principal Received:
+            The principal part of the payment
+
+        Interest Received:
+            The interest part of the payment
+
+        Total Amount Paid:
+            The total amount paid back to the investors
+
+        Principal Paid:
+            The amount of principal paid back to the investors
+
+        Interest Paid:
+            The amount of interest paid back to the investors
+
+        Earning:
+            The profit earned by the firm each month
+
+        Prepayment Rate:
+            The rate of prepayment each month given by the PSA prepayment model
+
+        Prepayment Amount:
+            The amount pre-paid in each by the mortgage holder
+
+        Total OutStanding Amount:
+            The total principal amount yet to be paid
+        """
+
+        return self._data
+
+    @data.setter
+    def data(self, val):
+        self._data = val
+
+    def _compute_values(self):
+        """
+        Fills the data frame of computations
+        """
+        rem_amount = self.P
+        c = self.loan_r
+        d = self.pass_r
+        n = self.T * self.periods
+        t = self.age + 1
+        mult = self.PSA / 100
+
+        while rem_amount > 0:
+            pay_rec = rem_amount * c / (1 - (1 + c) ** - (n - t + 1))
+            interest_rec = rem_amount * c
+            princ_rec = pay_rec - interest_rec
+            interest_paid = rem_amount * d
+            cpr = mult * 0.06 * (1 if t > 30 else t / 30)
+            smm = 1 - (1 - cpr) ** (1 / 12)
+            repay_amount = (rem_amount - princ_rec) * smm
+            princ_paid = princ_rec + repay_amount
+            tot_paid = princ_paid + interest_paid
+            profit = pay_rec - tot_paid
+            rem_amount -= princ_paid
+            t += 1
+
+            current_values = {
+                "Total Payment Received": pay_rec,
+                "Principal Received": princ_rec,
+                "Interest Received": interest_rec,
+                "Total Amount Paid": tot_paid,
+                "Principal Paid": princ_paid,
+                "Interest Paid": interest_paid,
+                "Earning": profit,
+                "Prepayment Rate": smm,
+                "Prepayment Amount": repay_amount,
+                "Total OutStanding Amount": rem_amount,
+            }
+
+            self.data = self.data.append(current_values, ignore_index=True)
+
+            self.data.index += 1
+
+
+    def __init__(self, P, T, loan_r, pass_r, PSA, age=0, periods_per_year=12):
+        """
+        Initializes the model from the given set of parameters.
+        """
+
+        self.P = P
+
+        self.T = T
+
+        self.loan_r = loan_r / periods_per_year
+
+        self.pass_r = pass_r / periods_per_year
+
+        self.PSA = PSA
+
+        self.age = age 
+
+        self.periods = periods_per_year
+
+        cols = [
+            "Total Payment Received",
+            "Principal Received",
+            "Interest Received",
+            "Total Amount Paid",
+            "Principal Paid",
+            "Interest Paid",
+            "Earning", 
+            "Prepayment Rate",
+            "Prepayment Amount",
+            "Total OutStanding Amount",
+        ]
+        data = pd.DataFrame(columns=cols)
+        self.data = data
+
+        self._compute_values()
