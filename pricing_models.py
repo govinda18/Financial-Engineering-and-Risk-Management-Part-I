@@ -69,7 +69,7 @@ class BinomialTree(ABC):
 		"""
         for i in range(self.n + 1):
             print("Period = " + str(i))
-            print(self.tree[i][: i + 1].round(10))
+            print(self.tree[i][: i + 1].round(3))
 
     def __init__(self, n, q=0.5):
         """
@@ -385,6 +385,20 @@ class BondPricing(BinomialTree):
     c: float
         The coupon rate of the bond. Defaults to zero assuming zero coupon bond.
 
+    hazard: dict
+        If set to None, the bond is assumed to be non-defaultable. Otherwise should contain 
+        a dictionary of following params:
+
+        a: float
+            The speed of hazard escalation
+
+        b: float
+            The exponential parameter of hazard
+
+        recovery_rate: float
+            The amount of interest paid back if a default occurs
+
+        default_probability[i, j] = a * b(i - j/2) 
     """
 
     __doc__ += BinomialTree.__doc__
@@ -409,10 +423,37 @@ class BondPricing(BinomialTree):
     def price(self):
         return self.tree[0, 0]
 
-    def _constructTree(self, rate):
+    def _compute_defaults(self, hazard):
+        """
+        Computes the probability of default at each node.
+
+        h[i, j] = a * b^(i - j/2)
+
+        Returns a tuple of hazard rates, recovery rate
+        """
+        h = np.zeros([self.n + 1, self.n + 1])
+        r = 1
+
+        if hazard is not None:
+            a = hazard['a']
+            b = hazard['b']
+            r = hazard['recovery_rate']
+            for i in range(self.n + 1):
+                for j in range(i + 1):
+                    h[i, j] = a * b ** (j - i/2)
+
+        return (h, r)
+
+    def _constructTree(self, r, h, recovery_rate):
         """
         Constructs the tree for bond pricing for n periods.
         """
+        if isinstance(r, int) or isinstance(r, float):
+            rate = np.empty([self.n + 1, self.n + 1])
+            rate.fill(r)
+        else:
+            rate = r.tree
+
         coupon = self.F * self.c
 
         self.tree[self.n] = np.repeat(self.F + coupon, self.n + 1)
@@ -421,12 +462,11 @@ class BondPricing(BinomialTree):
                 childd = self.tree[i + 1, j]
                 childu = self.tree[i + 1, j + 1]
 
-                price = coupon + (self.q * childu + (1 - self.q) * childd) / (
-                    1 + rate[i, j]
-                )
-                self.tree[i, j] = price
+                non_hazard_price = (coupon + (self.q * childu + (1 - self.q) * childd)) * (1 - h[i, j])
+                hazard_price = h[i, j] * recovery_rate * self.F
+                self.tree[i, j] = (non_hazard_price + hazard_price) / (1 + rate[i, j])
 
-    def __init__(self, n, F, q, r, c=0.0):
+    def __init__(self, n, F, q, r, c=0.0, hazard=None):
         """
         Initializes the bond pricing model from the given parameters.
         """
@@ -438,7 +478,9 @@ class BondPricing(BinomialTree):
 
         self.r = r
 
-        self._constructTree(r.tree)
+        h, recovery = self._compute_defaults(hazard)
+
+        self._constructTree(r, h, recovery)
 
 
 class ForwardsPricing(BinomialTree):
@@ -530,7 +572,7 @@ class SwapsPricing(BinomialTree):
     Parameters:
     ----------
     n: int
-        The number of periods.
+        The number of periods. Here n denotes the period at which the last payment occured.
 
     q: float
         The probability of the price of security going upward. 
